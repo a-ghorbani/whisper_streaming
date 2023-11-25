@@ -1,15 +1,21 @@
-#!/usr/bin/env python3
-from whisper_online import *
 
+#!/usr/bin/env python3
+import asyncio
+import websockets
+from whisper_online import *
 import sys
 import argparse
 import os
+import logging
+
+level = logging.INFO
+logging.basicConfig(level=level, format='whisper-server-%(levelname)s: %(message)s')
+
 parser = argparse.ArgumentParser()
 
 # server options
 parser.add_argument("--host", type=str, default='localhost')
 parser.add_argument("--port", type=int, default=43007)
-
 
 # options from whisper_online
 # TODO: code repetition
@@ -22,11 +28,10 @@ parser.add_argument('--lan', '--language', type=str, default='en', help="Languag
 parser.add_argument('--task', type=str, default='transcribe', choices=["transcribe","translate"],help="Transcribe or translate.")
 parser.add_argument('--backend', type=str, default="faster-whisper", choices=["faster-whisper", "whisper_timestamped"],help='Load only this backend for Whisper processing.')
 parser.add_argument('--vad', action="store_true", default=False, help='Use VAD = voice activity detection, with the default parameters.')
+
 args = parser.parse_args()
 
-
 # setting whisper object by args 
-
 SAMPLING_RATE = 16000
 
 size = args.model
@@ -65,7 +70,7 @@ online = OnlineASRProcessor(asr,create_tokenizer(tgt_language))
 
 
 
-demo_audio_path = "cs-maji-2.16k.wav"
+demo_audio_path = "./test/test.wav"
 if os.path.exists(demo_audio_path):
     # load the audio into the LRU cache before we start the timer
     a = load_audio_chunk(demo_audio_path,0,1)
@@ -78,73 +83,37 @@ else:
 
 
 
-
 ######### Server objects
 
-import line_packet
-import socket
+class WebSocketConnection:
+    def __init__(self, websocket):
+        self.websocket = websocket
+        logging.info("init WebSocketConnection")
 
-import logging
+    async def receive_audio_chunk(self):
+        logging.info("WebSocketConnection - receive_audio_chunk")
+        try:
+            data = await self.websocket.recv()
+            return data
+        except websockets.exceptions.ConnectionClosed:
+            logging.info("websockets.exceptions.ConnectionClosed")
+            return None
 
-
-class Connection:
-    '''it wraps conn object'''
-    PACKET_SIZE = 65536
-
-    def __init__(self, conn):
-        self.conn = conn
-        self.last_line = ""
-
-        self.conn.setblocking(True)
-
-    def send(self, line):
-        '''it doesn't send the same line twice, because it was problematic in online-text-flow-events'''
-        if line == self.last_line:
-            return
-        line_packet.send_one_line(self.conn, line)
-        self.last_line = line
-
-    def receive_lines(self):
-        in_line = line_packet.receive_lines(self.conn)
-        return in_line
-
-    def non_blocking_receive_audio(self):
-        r = self.conn.recv(self.PACKET_SIZE)
-        return r
-
-
+    async def send_result(self, result):
+        logging.info("sending results: %s", result)
+        if result:
+            await self.websocket.send(result)
 import io
 import soundfile
-
-# wraps socket and ASR object, and serves one client connection. 
-# next client should be served by a new instance of this object
-class ServerProcessor:
-
-    def __init__(self, c, online_asr_proc, min_chunk):
-        self.connection = c
+class WebSocketServerProcessor(): #ServerProcessor):
+    def __init__(self, connection, online_asr_proc, min_chunk_size):
+        self.connection = connection 
         self.online_asr_proc = online_asr_proc
-        self.min_chunk = min_chunk
+        self.min_chunk = min_chunk_size
 
         self.last_end = None
-
-    def receive_audio_chunk(self):
-        # receive all audio that is available by this time
-        # blocks operation if less than self.min_chunk seconds is available
-        # unblocks if connection is closed or a chunk is available
-        out = []
-        while sum(len(x) for x in out) < self.min_chunk*SAMPLING_RATE:
-            raw_bytes = self.connection.non_blocking_receive_audio()
-            print("raw_bytes[:10]: ", raw_bytes[:10])
-            print("len(raw_bytes): ", len(raw_bytes))
-            if not raw_bytes:
-                break
-            sf = soundfile.SoundFile(io.BytesIO(raw_bytes), channels=1,endian="LITTLE",samplerate=SAMPLING_RATE, subtype="PCM_16",format="RAW")
-            audio, _ = librosa.load(sf,sr=SAMPLING_RATE)
-            out.append(audio)
-        if not out:
-            return None
-        return np.concatenate(out)
-
+        #super().__init__(connection, online_asr_proc, min_chunk_size)
+    
     def format_output_transcript(self,o):
         # output format in stdout is like:
         # 0 1720 Takhle to je
@@ -169,50 +138,48 @@ class ServerProcessor:
             print(o,file=sys.stderr,flush=True)
             return None
 
-    def send_result(self, o):
+    async def send_result(self, o):
+        print("sending result")
         msg = self.format_output_transcript(o)
+        print("and the result: ", msg)
         if msg is not None:
-            self.connection.send(msg)
+            try:
+                await self.connection.send_result(msg)
+            except Exception as e:
+                logging.error(e)
 
-    def process(self):
-        # handle one client connection
+    async def process(self):
         self.online_asr_proc.init()
         while True:
-            a = self.receive_audio_chunk()
-            if a is None:
-                print("break here",file=sys.stderr)
-                break
-            self.online_asr_proc.insert_audio_chunk(a)
-            o = online.process_iter()
-            try:
-                self.send_result(o)
-            except BrokenPipeError:
-                print("broken pipe -- connection closed?",file=sys.stderr)
+            logging.info("receiving")
+            raw_bytes = await self.connection.receive_audio_chunk()
+
+            if raw_bytes is None:
                 break
 
-        o = online.finish()  # this should be working
-        self.send_result(o)
+            sf = soundfile.SoundFile(io.BytesIO(raw_bytes), channels=1,endian="LITTLE",samplerate=SAMPLING_RATE, subtype="PCM_16",format="RAW")
+            audio_chunk, _ = librosa.load(sf,sr=SAMPLING_RATE)
 
+            self.online_asr_proc.insert_audio_chunk(audio_chunk)
+            logging.info("process_iter")
+            result = self.online_asr_proc.process_iter()
+            logging.info("sending result: %s", result)
+            await self.send_result(result)
+        final_result = self.online_asr_proc.finish()
+        logging.info("finished result: %s", final_result)
+        await self.send_result(final_result)
 
+async def handle_client(websocket, path):
+    client_address = websocket.remote_address
+    logging.info(f'Client connected: {client_address}')
 
+    connection = WebSocketConnection(websocket)
+    processor = WebSocketServerProcessor(connection, online, args.min_chunk_size)
+    await processor.process()
 
-# Start logging.
-level = logging.INFO
-logging.basicConfig(level=level, format='whisper-server-%(levelname)s: %(message)s')
+# Start server
+start_server = websockets.serve(handle_client, args.host, args.port)
+logging.info(f'WebSocket server started on ws://{args.host}:{args.port}')
 
-# server loop
-
-with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.bind((args.host, args.port))
-    s.listen(1)
-    logging.info('INFO: Listening on'+str((args.host, args.port)))
-    while True:
-        conn, addr = s.accept()
-        logging.info('INFO: Connected to client on {}'.format(addr))
-        connection = Connection(conn)
-        proc = ServerProcessor(connection, online, min_chunk)
-        proc.process()
-        conn.close()
-        logging.info('INFO: Connection to client closed')
-logging.info('INFO: Connection closed, terminating.')
+asyncio.get_event_loop().run_until_complete(start_server)
+asyncio.get_event_loop().run_forever()

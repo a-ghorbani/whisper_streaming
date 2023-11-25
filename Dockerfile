@@ -9,17 +9,18 @@ RUN apt-get update && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-RUN pip install faster-whisper opus-fast-mosestokenizer librosa soundfile audioread
+RUN pip install faster-whisper opus-fast-mosestokenizer librosa soundfile audioread websockets
 ENV LD_LIBRARY_PATH /usr/local/lib/python3.10/site-packages/mosestokenizer/lib:$LD_LIBRARY_PATH
 
-RUN git clone https://github.com/a-ghorbani/whisper_streaming.git
+# RUN git clone https://github.com/a-ghorbani/whisper_streaming.git
+COPY . /usr/src/app/whisper_streaming
 
 WORKDIR /usr/src/app/whisper_streaming
 
-EXPOSE 43001
+EXPOSE 43007
 
 RUN useradd -m appuser
 USER appuser
 
-CMD ["python", "whisper_online_server.py"]
+CMD ["python", "whisper_online_server_ws.py"]
 
