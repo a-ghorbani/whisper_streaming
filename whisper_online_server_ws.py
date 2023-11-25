@@ -84,7 +84,7 @@ else:
 
 
 ######### Server objects
-
+import json
 class WebSocketConnection:
     def __init__(self, websocket):
         self.websocket = websocket
@@ -132,8 +132,9 @@ class WebSocketServerProcessor(): #ServerProcessor):
                 beg = max(beg, self.last_end)
 
             self.last_end = end
-            print("%1.0f %1.0f %s" % (beg,end,o[2]),flush=True,file=sys.stderr)
-            return "%1.0f %1.0f %s" % (beg,end,o[2])
+            text = o[2]
+            print("%1.0f %1.0f %s" % (beg,end,text),flush=True,file=sys.stderr)
+            return json.dumps({'beg': beg, 'end': end, 'text': text})
         else:
             print(o,file=sys.stderr,flush=True)
             return None
