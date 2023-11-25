@@ -70,14 +70,14 @@ online = OnlineASRProcessor(asr,create_tokenizer(tgt_language))
 
 
 
-demo_audio_path = "./test/test.wav"
+demo_audio_path = "./test/Conference.wav"
 if os.path.exists(demo_audio_path):
     # load the audio into the LRU cache before we start the timer
     a = load_audio_chunk(demo_audio_path,0,1)
 
     # TODO: it should be tested whether it's meaningful
     # warm up the ASR, because the very first transcribe takes much more time than the other
-    asr.transcribe(a)
+    print(f"demo transcription: {asr.transcribe(a)}") 
 else:
     print("Whisper is not warmed up",file=sys.stderr)
 
@@ -155,6 +155,10 @@ class WebSocketServerProcessor(): #ServerProcessor):
             raw_bytes = await self.connection.receive_audio_chunk()
 
             if raw_bytes is None:
+                break
+
+            if raw_bytes == "END_OF_STREAM":
+                logging.info("END_OF_STREAM")
                 break
 
             sf = soundfile.SoundFile(io.BytesIO(raw_bytes), channels=1,endian="LITTLE",samplerate=SAMPLING_RATE, subtype="PCM_16",format="RAW")

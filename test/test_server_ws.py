@@ -21,6 +21,7 @@ async def send_audio(websocket, audio_data, chunk_size=65536):
             break
         print('Sending audio chunk')
         await websocket.send(audio_chunk)
+    await websocket.send("END_OF_STREAM")
 
 async def receive_transcription(websocket):
     while True:
