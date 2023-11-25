@@ -1,7 +1,7 @@
 FROM python:3.10.13
 
 # Set the working directory in the container
-WORKDIR /usr/src/app
+WORKDIR /app
 
 # Install dependencies 
 RUN apt-get update && \
@@ -13,9 +13,9 @@ RUN pip install faster-whisper opus-fast-mosestokenizer librosa soundfile audior
 ENV LD_LIBRARY_PATH /usr/local/lib/python3.10/site-packages/mosestokenizer/lib:$LD_LIBRARY_PATH
 
 # RUN git clone https://github.com/a-ghorbani/whisper_streaming.git
-COPY . /usr/src/app/whisper_streaming
+COPY . /app/whisper_streaming
 
-WORKDIR /usr/src/app/whisper_streaming
+WORKDIR /app/whisper_streaming
 
 EXPOSE 43007
 

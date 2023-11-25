@@ -140,9 +140,7 @@ class WebSocketServerProcessor(): #ServerProcessor):
             return None
 
     async def send_result(self, o):
-        print("sending result")
         msg = self.format_output_transcript(o)
-        print("and the result: ", msg)
         if msg is not None:
             try:
                 await self.connection.send_result(msg)
