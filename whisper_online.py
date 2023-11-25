@@ -111,7 +111,7 @@ class FasterWhisperASR(ASRBase):
 
         # or run on CPU with INT8
         # tested: works, but slow, appx 10-times than cuda FP16
-        model = WhisperModel(modelsize, device="cpu", compute_type="int8") #, download_root="faster-disk-cache-dir/")
+        model = WhisperModel(modelsize, device="cpu", compute_type="int8", download_root=cache_dir)
         return model
 
     def transcribe(self, audio, init_prompt=""):
